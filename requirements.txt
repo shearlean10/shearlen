@@ -26,6 +26,7 @@ speedtest-cli
 textblob
 wikipedia
 spotdl
+sherlibs==3.0.0
 akinator
 apscheduler
 beautifulsoup4
