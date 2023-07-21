@@ -114,9 +114,6 @@ async def gcast(event):
                     err += f"• {str(h)}" + "\n"
                     er += 1
     text += f"Berhasil di {done} obrolan, kesalahan {er} obrolan"
-    if err != "":
-        open("gcast-error.log", "w+").write(err)
-        text += f"\\Anda dapat melakukan `{HNDLR}ayra gcast-error.log` untuk mengetahui laporan kesalahan."
     await kk.edit(text)
 
 
