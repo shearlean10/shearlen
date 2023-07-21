@@ -56,7 +56,7 @@ async def gcast(event):
             event, "`Berikan beberapa teks ke Globally Broadcast atau balas pesan..`"
         )
 
-    kk = await event.eor("`Sebentar Kalo Limit Jangan Salahin Kynan Ya...`")
+    kk = await event.eor("`Sebentar Kalo Limit Jangan Salahin @sherleanshop Ya...`")
     er = 0
     done = 0
     err = ""
@@ -114,6 +114,9 @@ async def gcast(event):
                     err += f"• {str(h)}" + "\n"
                     er += 1
     text += f"Berhasil di {done} obrolan, kesalahan {er} obrolan"
+    if err != "":
+        open("gcast-error.log", "w+").write(err)
+        text += f"\\Anda dapat melakukan `{HNDLR}Shearlen gcast-error.log` untuk mengetahui laporan kesalahan."
     await kk.edit(text)
 
 
@@ -133,7 +136,7 @@ async def gucast(event):
         return await eor(
             event, "`Berikan beberapa teks ke Globally Broadcast atau balas pesan..`"
         )
-    kk = await event.eor("`Sebentar Kalo Limit Jangan Salahin Kynan Ya...`")
+    kk = await event.eor("`Sebentar Kalo Limit Jangan Salahin @sherleanshop Ya...`")
     er = 0
     done = 0
     async for x in event.client.iter_dialogs():
