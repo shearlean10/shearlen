@@ -1,8 +1,8 @@
 import os
 
-#from dotenv import load_dotenv
+from dotenv import load_dotenv
 
-#load_dotenv()
+load_dotenv()
 
 if os.environ.get("HEROKU_API"):
     from heroku3 import from_key
