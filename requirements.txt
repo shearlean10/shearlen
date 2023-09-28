@@ -6,7 +6,7 @@ python-decouple
 pymongo
 httpx
 python-dotenv
-pytgcalls==3.0.0.dev24
+pytgcalls==3.0.0.dev22
 covid
 fonttools
 gtts
@@ -39,7 +39,7 @@ lottie
 numpy>=1.21.2
 oauth2client
 opencv-python-headless==4.5.5.62
-pillow>=7.0.0
+pillow==8.3.2
 profanitydetector
 psutil
 pypdf2>=1.26.0
@@ -56,7 +56,6 @@ covid
 emoji
 fonttools
 gtts
-gingerit
 jikanpy
 phlogo
 pokedex.py
