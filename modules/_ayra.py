@@ -1,15 +1,15 @@
-# Ayra - UserBot
-# Copyright (C) 2021-2022 senpai80
+# Ultroid - UserBot
+# Copyright (C) 2021-2023 TeamUltroid
 #
-# This file is a part of < https://github.com/senpai80/Ayra/ >
+# This file is a part of < https://github.com/TeamUltroid/Ultroid/ >
 # PLease read the GNU Affero General Public License in
-# <https://www.github.com/senpai80/Ayra/blob/main/LICENSE/>.
+# <https://www.github.com/TeamUltroid/Ultroid/blob/main/LICENSE/>.
 
 
 from . import LOG_CHANNEL, Button, asst, ayra_cmd, eor, get_string
 
 REPOMSG = """
-◈ **ᴀʏʀᴀ ꭙ ᴜꜱᴇʀʙᴏᴛ​** ◈\n
+◈ **ᴀʏʀᴀ ꭙ ᴜꜱᴇʀʙᴏᴛ** ◈\n
 ◈ Repo - [Click Here](https://github.com/naya1503/Naya-Userbot)
 ◈ Support - @kynansupport
 """
@@ -26,7 +26,7 @@ AYSTRING = """🎇 **Thanks for Deploying Naya-Userbot**
 • Here, are the Some Basic stuff from, where you can Know, about its Usage."""
 
 
-@ayra_cmd(pattern="repo")
+@ayra_cmd(pattern="Repo$")
 async def useAyra(rs):
     button = Button.inline("Start >>", "initft_2")
     msg = await asst.send_message(
