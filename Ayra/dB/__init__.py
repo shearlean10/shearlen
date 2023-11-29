@@ -13,9 +13,8 @@ from .. import *
 DEVS = [
     1898065191,  # @rizzvbss
     5874071867,   #sherlean
-    456673291,  #rafly
-    1209083801, #rendi
-    976636757, #fly
+    379497328,  #yan
+    614989351, #jihan
     1356935643, #caca
 ]
 
