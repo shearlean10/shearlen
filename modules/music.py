@@ -1,479 +1,507 @@
-# Ultroid - UserBot
-# Copyright (C) 2021-2023 TeamUltroid
+# Ayra - UserBot
+# Copyright (C) 2021-2022 senpai80
 #
-# This file is a part of < https://github.com/TeamUltroid/Ultroid/ >
+# This file is a part of < https://github.com/senpai80/Ayra/ >
 # PLease read the GNU Affero General Public License in
-# <https://www.github.com/TeamUltroid/Ultroid/blob/main/LICENSE/>.
+# <https://www.github.com/senpai80/Ayra/blob/main/LICENSE/>.
 
-import asyncio
+"""
+✘ **Bantuan Untuk Music**
+
+๏ **Perintah:** `rejoin`
+◉ **Keterangan:** Gunakan ini Jika saat memutar musik patah-patah.
+
+๏ **Perintah:** `skip`
+◉ **Keterangan:** Lewati trek lagu saat ini.
+
+๏ **Perintah:** `play` <berikan judul/balas audio>
+◉ **Keterangan:** Putar Lagu atau Balas Ke Audio.
+
+๏ **Perintah:** `ytplaylist` <berikan link playlist yt>
+◉ **Keterangan:** Putar Lagu Playlist Youtube.
+
+๏ **Perintah:** `vplay` <berikan judul/balas video>
+◉ **Keterangan:** Putar Video Dengan Judul atau Balas File.
+
+๏ **Perintah:** `mutevc`
+◉ **Keterangan:** Bisukan musik.
+
+๏ **Perintah:** `pause`
+◉ **Keterangan:** Pause musik.
+
+๏ **Perintah:** `unmutevc`
+◉ **Keterangan:** Unmute musik.
+
+๏ **Perintah:** `resume`
+◉ **Keterangan:** Resume musik.
+
+๏ **Perintah:** `addauth`
+◉ **Keterangan:** Tambahkan izin pengguna lain untuk memutar.
+
+๏ **Perintah:** `remauth`
+◉ **Keterangan:** Hapus izin pengguna .
+
+๏ **Perintah:** `listauth`
+◉ **Keterangan:** Daftar pengguna yang diizinkan.
+
+๏ **Perintah:** `vcaccess` <id pengguna/balas pengguna>
+◉ **Keterangan:** Tambahkan izin pengguna lain untuk memutar.
+
+๏ **Perintah:** `rmvcaccess`
+◉ **Keterangan:** Hapus izin pengguna .
+
+๏ **Perintah:** `listvcaccess`
+◉ **Keterangan:** Daftar pengguna yang diizinkan.
+
+๏ **Perintah:** `listplay`
+◉ **Keterangan:** Daftar pengguna yang diizinkan.
+
+"""
+
 import os
-from time import time
-from traceback import format_exc
+import re
 
-from Ayra import HNDLR, LOGS, asst, udB, vcClient
-from Ayra._misc import owner_and_sudos
-from Ayra._misc._decorators import compile_pattern
-from Ayra.fns.admins import admin_check
-from Ayra.fns.helper import bash, downloader, time_formatter
-from Ayra.fns.ytdl import get_videos_link
-from Ayra.version import __version__ as AyVer
-from pytgcalls import GroupCallFactory
-from pytgcalls.exceptions import GroupCallNotFoundError
-from telethon import events
+from Ayra.dB.vc_sudos import *
+from Ayra.fns.helper import *
+from Ayra.fns.info import *
+from Ayra.fns.misc import *
+from Ayra.fns.tools import *
+from pytgcalls.exceptions import NotConnectedError
 from telethon.errors.rpcerrorlist import (ChatSendMediaForbiddenError,
-                                          ParticipantJoinMissingError)
-from telethon.tl import functions
+                                          MessageIdInvalidError)
 
-try:
-    from yt_dlp import YoutubeDL
-except ImportError:
-    YoutubeDL = None
-    LOGS.error("'yt-dlp' not found!")
-
-try:
-    from youtubesearchpython import VideosSearch
-except ImportError:
-    VideosSearch = None
+from . import *
+from ._music import *
 
 
-asstUserName = asst.me.username
-LOG_CHANNEL = udB.get_key("LOG_CHANNEL")
-ACTIVE_CALLS, VC_QUEUE = [], {}
-MSGID_CACHE, VIDEO_ON = {}, {}
-CLIENTS = {}
-
-
-def VC_AUTHS():
-    _vcsudos = udB.get_key("VC_SUDOS") or []
-    return [int(a) for a in [*owner_and_sudos(), *_vcsudos]]
-
-
-class Player:
-    def __init__(self, chat, event=None, video=False):
-        self._chat = chat
-        self._current_chat = event.chat_id if event else LOG_CHANNEL
-        self._video = video
-        if CLIENTS.get(chat):
-            self.group_call = CLIENTS[chat]
-        else:
-            _client = GroupCallFactory(
-                vcClient,
-                GroupCallFactory.MTPROTO_CLIENT_TYPE.TELETHON,
-            )
-            self.group_call = _client.get_group_call()
-            CLIENTS.update({chat: self.group_call})
-
-    async def make_vc_active(self):
-        try:
-            await vcClient(
-                functions.phone.CreateGroupCallRequest(
-                    self._chat, title="🎧 Naya Music 🎶"
-                )
-            )
-        except Exception as e:
-            LOGS.exception(e)
-            return False, e
-        return True, None
-
-    async def startCall(self):
-        if VIDEO_ON:
-            for chats in VIDEO_ON:
-                await VIDEO_ON[chats].stop()
-            VIDEO_ON.clear()
-            await asyncio.sleep(3)
-        if self._video:
-            for chats in list(CLIENTS):
-                if chats != self._chat:
-                    await CLIENTS[chats].stop()
-                    del CLIENTS[chats]
-            VIDEO_ON.update({self._chat: self.group_call})
-        if self._chat not in ACTIVE_CALLS:
-            try:
-                self.group_call.on_network_status_changed(self.on_network_changed)
-                self.group_call.on_playout_ended(self.playout_ended_handler)
-                await self.group_call.join(self._chat)
-            except GroupCallNotFoundError as er:
-                LOGS.info(er)
-                dn, err = await self.make_vc_active()
-                if err:
-                    return False, err
-            except Exception as e:
-                LOGS.exception(e)
-                return False, e
-        return True, None
-
-    async def on_network_changed(self, call, is_connected):
-        chat = self._chat
-        if is_connected:
-            if chat not in ACTIVE_CALLS:
-                ACTIVE_CALLS.append(chat)
-        elif chat in ACTIVE_CALLS:
-            ACTIVE_CALLS.remove(chat)
-
-    async def playout_ended_handler(self, call, source, mtype):
-        if os.path.exists(source):
-            os.remove(source)
-        await self.play_from_queue()
-
-    async def play_from_queue(self):
-        chat_id = self._chat
-        if chat_id in VIDEO_ON:
-            await self.group_call.stop_video()
-            VIDEO_ON.pop(chat_id)
-        try:
-            song, title, link, thumb, from_user, pos, dur = await get_from_queue(
-                chat_id
-            )
-            try:
-                await self.group_call.start_audio(song)
-            except ParticipantJoinMissingError:
-                await self.vc_joiner()
-                await self.group_call.start_audio(song)
-            if MSGID_CACHE.get(chat_id):
-                await MSGID_CACHE[chat_id].delete()
-                del MSGID_CACHE[chat_id]
-            text = f"<strong>🎧 Sedang dimainkan #{pos}: <a href={link}>{title}</a>\n⏰ Durasi:</strong> <code>{dur}</code>\n👤 <strong>Diminta oleh:</strong> {from_user}"
-
-            try:
-                xx = await vcClient.send_message(
-                    self._current_chat,
-                    f"<strong>🎧 Sedang dimainkan #{pos}: <a href={link}>{title}</a>\n⏰ Durasi:</strong> <code>{dur}</code>\n👤 <strong>Diminta oleh:</strong> {from_user}",
-                    file=thumb,
-                    link_preview=False,
-                    parse_mode="html",
-                )
-
-            except ChatSendMediaForbiddenError:
-                xx = await vcClient.send_message(
-                    self._current_chat, text, link_preview=False, parse_mode="html"
-                )
-            MSGID_CACHE.update({chat_id: xx})
-            VC_QUEUE[chat_id].pop(pos)
-            if not VC_QUEUE[chat_id]:
-                VC_QUEUE.pop(chat_id)
-
-        except (IndexError, KeyError):
-            await self.group_call.stop()
-            del CLIENTS[self._chat]
-            await vcClient.send_message(
-                self._current_chat,
-                f"❏ <b>Berhasil Turun Voice Chat</b>\n└ <b>Chat ID:</b> <code>{chat_id}</code>",
-                parse_mode="html",
-            )
-        except Exception as er:
-            LOGS.exception(er)
-            await vcClient.send_message(
-                self._current_chat,
-                f"<strong>ERROR:</strong> <code>{format_exc()}</code>",
-                parse_mode="html",
-            )
-
-    async def vc_joiner(self):
-        chat_id = self._chat
-        done, err = await self.startCall()
-
-        if done:
-            await vcClient.send_message(
-                self._current_chat,
-                f"❏ <b>Berhasil Bergabung Voice Chat</b>\n└ <b>Chat ID:</b> <code>{chat_id}</code>",
-                parse_mode="html",
-            )
-
-            return True
-        await vcClient.send_message(
-            self._current_chat,
-            f"<strong>ERROR</strong> <code>{chat_id}</code> :\n<code>{err}</code>",
-            parse_mode="html",
-        )
-        return False
-
-
-# --------------------------------------------------
-
-
-def vc_asst(dec, **kwargs):
-    def ult(func):
-        kwargs["func"] = (
-            lambda e: not e.is_private and not e.via_bot_id and not e.fwd_from
-        )
-        handler = udB.get_key("VC_HNDLR") or HNDLR
-        kwargs["pattern"] = compile_pattern(dec, handler)
-        vc_auth = kwargs.get("vc_auth", True)
-        key = udB.get_key("VC_AUTH_GROUPS") or {}
-        if "vc_auth" in kwargs:
-            del kwargs["vc_auth"]
-
-        async def vc_handler(e):
-            VCAUTH = list(key.keys())
-            if not (
-                (e.out)
-                or (e.sender_id in VC_AUTHS())
-                or (vc_auth and e.chat_id in VCAUTH)
-            ):
-                return
-            elif vc_auth and key.get(e.chat_id):
-                cha, adm = key.get(e.chat_id), key[e.chat_id]["admins"]
-                if adm and not (await admin_check(e)):
-                    return
-            try:
-                await func(e)
-            except Exception:
-                LOGS.exception(Exception)
-                await asst.send_message(
-                    LOG_CHANNEL,
-                    f"VC Error - <code>{AyVer}</code>\n\n<code>{e.text}</code>\n\n<code>{format_exc()}</code>",
-                    parse_mode="html",
-                )
-
-        vcClient.add_event_handler(
-            vc_handler,
-            events.NewMessage(**kwargs),
-        )
-
-    return ult
-
-
-# --------------------------------------------------
-
-
-def add_to_queue(chat_id, song, song_name, link, thumb, from_user, duration):
+@vc_asst("play")
+async def play_music_(event):
+    if "playfrom" in event.text.split()[0]:
+        return  # For PlayFrom Conflict
     try:
-        n = sorted(list(VC_QUEUE[chat_id].keys()))
-        play_at = n[-1] + 1
-    except BaseException:
-        play_at = 1
-    stuff = {
-        play_at: {
-            "song": song,
-            "title": song_name,
-            "link": link,
-            "thumb": thumb,
-            "from_user": from_user,
-            "duration": duration,
-        }
-    }
-    if VC_QUEUE.get(chat_id):
-        VC_QUEUE[int(chat_id)].update(stuff)
-    else:
-        VC_QUEUE.update({chat_id: stuff})
-    return VC_QUEUE[chat_id]
-
-
-def list_queue(chat):
-    if VC_QUEUE.get(chat):
-        txt, n = "", 0
-        for x in list(VC_QUEUE[chat].keys())[:18]:
-            n += 1
-            data = VC_QUEUE[chat][x]
-            txt += f'<strong>{n}. <a href={data["link"]}>{data["title"]}</a> :</strong> <i>By: {data["from_user"]}</i>\n'
-        txt += "\n\n....."
-        return txt
-
-
-async def get_from_queue(chat_id):
-    play_this = list(VC_QUEUE[int(chat_id)].keys())[0]
-    info = VC_QUEUE[int(chat_id)][play_this]
-    song = info.get("song")
-    title = info["title"]
-    link = info["link"]
-    thumb = info["thumb"]
-    from_user = info["from_user"]
-    duration = info["duration"]
-    if not song:
-        song = await get_stream_link(link)
-    return song, title, link, thumb, from_user, play_this, duration
-
-
-# --------------------------------------------------
-
-from asyncio import get_event_loop
-from functools import partial
-from json import dumps, loads
-from urllib.parse import quote_plus
-
-from requests import get
-
-
-def run_sync(func, *args, **kwargs):
-    return get_event_loop().run_in_executor(None, partial(func, *args, **kwargs))
-
-
-class YouTubeSearch:
-    def __init__(self, search_terms: str, max_results=None):
-        self.search_terms = search_terms
-        self.max_results = max_results
-        self.videos = self._search()
-
-    def _search(self):
-        encoded_search = quote_plus(self.search_terms)
-        url = f"https://www.youtube.com/results?search_query={encoded_search}"
-        response = get(url).text
-        while "ytInitialData" not in response:
-            response = get(url).text
-        results = self._parse_html(response)
-        if self.max_results is not None and len(results) > self.max_results:
-            return results[: self.max_results]
-        return results
-
-    @staticmethod
-    def _parse_html(response):
-        results = []
-        start = response.index("ytInitialData") + len("ytInitialData") + 3
-        end = response.index("};", start) + 1
-        json_str = response[start:end]
-        data = loads(json_str)
-
-        for contents in data["contents"]["twoColumnSearchResultsRenderer"][
-            "primaryContents"
-        ]["sectionListRenderer"]["contents"]:
-            for video in contents["itemSectionRenderer"]["contents"]:
-                res = {}
-                if "videoRenderer" in video.keys():
-                    video_data = video.get("videoRenderer", {})
-                    res["id"] = video_data.get("videoId", None)
-                    res["title"] = (
-                        video_data.get("title", {})
-                        .get("runs", [[{}]])[0]
-                        .get("text", None)
-                    )
-                    res["duration"] = video_data.get("lengthText", {}).get(
-                        "simpleText", 0
-                    )
-                    res["views"] = video_data.get("viewCountText", {}).get(
-                        "simpleText", 0
-                    )
-                    res["link"] = "https://www.youtube.com" + (
-                        video_data.get("navigationEndpoint", {})
-                        .get("commandMetadata", {})
-                        .get("webCommandMetadata", {})
-                        .get("url", None)
-                    )
-                    if (
-                        res["duration"] != 0
-                        and res["views"] != 0
-                        and sum(
-                            int(x) * 60**i
-                            for i, x in enumerate(
-                                reversed(str(res["duration"]).split(":"))
-                            )
-                        )
-                        < 7200
-                    ):
-                        results.append(res)
-
-            if results:
-                return results
-        return results
-
-    def to_dict(self, clear_cache=True):
-        result = self.videos
-        if clear_cache:
-            self.videos = ""
-        return result
-
-    def to_json(self, clear_cache=True):
-        result = dumps({"videos": self.videos})
-        if clear_cache:
-            self.videos = ""
-        return result
-
-
-async def download(query):
-    if query.startswith("https://") and "youtube" not in query.lower():
-        thumb, duration = None, "Unknown"
-        title = link = query
-    else:
-        search = VideosSearch(query, limit=1).result()
-        results = YouTubeSearch(query, max_results=1).to_dict()
-        videoid = results[0]["id"]
-        title = results[0]["title"]
-        duration = results[0]["duration"]
-        link = results[0]["link"]
-        thumb = f"https://img.youtube.com/vi/{videoid}/hqdefault.jpg"
-    dl = await get_stream_link(link)
-    return dl, thumb, title, link, duration
-
-
-async def get_stream_link(ytlink):
-    stream = await bash(f'yt-dlp -g -f "best[height<=?720][width<=?1280]" {ytlink}')
-    return stream[0]
-
-
-async def vid_download(query):
-    search = VideosSearch(query, limit=1).result()
-    data = search["result"][0]
-    link = data["link"]
-    video = await get_stream_link(link)
-    title = data["title"]
-    thumb = f"https://i.ytimg.com/vi/{data['id']}/hqdefault.jpg"
-    duration = data.get("duration") or "♾"
-    return video, thumb, title, link, duration
-
-
-async def dl_playlist(chat, from_user, link):
-    # untill issue get fix
-    # https://github.com/alexmercerind/youtube-search-python/issues/107
-    """
-    vids = Playlist.getVideos(link)
-    try:
-        vid1 = vids["videos"][0]
-        duration = vid1["duration"] or "♾"
-        title = vid1["title"]
-        song = await get_stream_link(vid1['link'])
-        thumb = f"https://i.ytimg.com/vi/{vid1['id']}/hqdefault.jpg"
-        return song[0], thumb, title, vid1["link"], duration
-    finally:
-        vids = vids["videos"][1:]
-        for z in vids:
-            duration = z["duration"] or "♾"
-            title = z["title"]
-            thumb = f"https://i.ytimg.com/vi/{z['id']}/hqdefault.jpg"
-            add_to_queue(chat, None, title, z["link"], thumb, from_user, duration)
-    """
-    links = await get_videos_link(link)
-    try:
-        search = VideosSearch(links[0], limit=1).result()
-        vid1 = search["result"][0]
-        duration = vid1.get("duration") or "♾"
-        title = vid1["title"]
-        song = await get_stream_link(vid1["link"])
-        thumb = f"https://i.ytimg.com/vi/{vid1['id']}/hqdefault.jpg"
-        return song, thumb, title, vid1["link"], duration
-    finally:
-        for z in links[1:]:
+        xx = await event.eor(get_string("com_1"), parse_mode="md")
+    except MessageIdInvalidError:
+        # Changing the way, things work
+        xx = event
+        xx.out = False
+    chat = event.chat_id
+    from_user = inline_mention(event.sender, html=True)
+    reply, song = None, None
+    if event.reply_to:
+        reply = await event.get_reply_message()
+    if len(event.text.split()) > 1:
+        input = event.text.split(maxsplit=1)[1]
+        tiny_input = input.split()[0]
+        if tiny_input[0] in ["@", "-"]:
             try:
-                search = VideosSearch(z, limit=1).result()
-                vid = search["result"][0]
-                duration = vid.get("duration") or "♾"
-                title = vid["title"]
-                thumb = f"https://i.ytimg.com/vi/{vid['id']}/hqdefault.jpg"
-                add_to_queue(chat, None, title, vid["link"], thumb, from_user, duration)
+                chat = await event.client.parse_id(tiny_input)
             except Exception as er:
                 LOGS.exception(er)
-
-
-async def file_download(event, reply, fast_download=False):
-    thumb = "https://telegra.ph//file/fc93865e70ab86745c11d.jpg"
-    title = reply.file.title or reply.file.name or f"{str(time())}.jpg"
-    file = reply.file.name or f"{str(time())}.jpg"
-    if fast_download:
-        dl = await downloader(
-            f"/downloads/{file}",
-            reply.media.document,
-            event,
-            time(),
-            f"Downloading {title}...",
+                return await xx.edit(str(er))
+            try:
+                song = input.split(maxsplit=1)[1]
+            except IndexError:
+                pass
+            except Exception as e:
+                return await event.eor(str(e))
+        else:
+            song = input
+    if not (reply or song):
+        return await xx.eor(
+            "Harap tentukan nama lagu atau balas ke file audio !", time=5
+        )
+    await xx.eor(get_string("vcbot_20"), parse_mode="md")
+    if reply and reply.media and mediainfo(reply.media).startswith(("audio", "video")):
+        song, thumb, song_name, link, duration = await file_download(xx, reply)
+    else:
+        song, thumb, song_name, link, duration = await download(song)
+        if len(link.strip().split()) > 1:
+            link = link.strip().split()
+    aySongs = Player(chat, event)
+    song_name = f"{song_name[:30]}..."
+    if not aySongs.group_call.is_connected:
+        if not (await aySongs.vc_joiner()):
+            return
+        await aySongs.group_call.start_audio(song)
+        if isinstance(link, list):
+            for lin in link[1:]:
+                add_to_queue(chat, song, lin, lin, None, from_user, duration)
+            link = song_name = link[0]
+        text = "📀 <strong>Sedang dimainkan: <a href={}>{}</a>\n⏰ Durasi:</strong> <code>{}</code>\n👥 <strong>Di:</strong> <code>{}</code>\n🙋‍♂ <strong>Diminta oleh: {}</strong>".format(
+            link, song_name, duration, chat, from_user
+        )
+        try:
+            await xx.reply(
+                text,
+                file=thumb,
+                link_preview=False,
+                parse_mode="html",
+            )
+            await xx.delete()
+        except ChatSendMediaForbiddenError:
+            await xx.eor(text, link_preview=False)
+        if thumb and os.path.exists(thumb):
+            os.remove(thumb)
+    else:
+        if not (
+            reply
+            and reply.media
+            and mediainfo(reply.media).startswith(("audio", "video"))
+        ):
+            song = None
+        if isinstance(link, list):
+            for lin in link[1:]:
+                add_to_queue(chat, song, lin, lin, None, from_user, duration)
+            link = song_name = link[0]
+        add_to_queue(chat, song, song_name, link, thumb, from_user, duration)
+        return await xx.eor(
+            f"✚ Ditambahkan 🎵 <a href={link}>{song_name}</a> antrian ke #{list(VC_QUEUE[chat].keys())[-1]}.",
+            parse_mode="html",
         )
 
-        dl = dl.name
+
+@vc_asst("mutevc")
+async def mute(event):
+    if len(event.text.split()) > 1:
+        chat = event.text.split()[1]
+        try:
+            chat = await event.client.parse_id(chat)
+        except Exception as e:
+            return await event.eor(f"**ERROR:**\n{str(e)}")
     else:
-        dl = await reply.download_media()
-    duration = (
-        time_formatter(reply.file.duration * 1000) if reply.file.duration else "🤷‍♂️"
+        chat = event.chat_id
+    aySongs = Player(chat)
+    await aySongs.group_call.set_is_mute(True)
+    await event.eor(get_string("vcbot_12"))
+
+
+@vc_asst("unmutevc")
+async def unmute(event):
+    if len(event.text.split()) > 1:
+        chat = event.text.split()[1]
+        try:
+            chat = await event.client.parse_id(chat)
+        except Exception as e:
+            return await event.eor(f"**ERROR:**\n{str(e)}")
+    else:
+        chat = event.chat_id
+    aySongs = Player(chat)
+    await aySongs.group_call.set_is_mute(False)
+    await event.eor("`Menyalakan pemutaran di obrolan ini.`")
+
+
+@vc_asst("pausevc")
+async def pauser(event):
+    if len(event.text.split()) > 1:
+        chat = event.text.split()[1]
+        try:
+            chat = await event.client.parse_id(chat)
+        except Exception as e:
+            return await event.eor(f"**ERROR:**\n{str(e)}")
+    else:
+        chat = event.chat_id
+    aySongs = Player(chat)
+    await aySongs.group_call.set_pause(True)
+    await event.eor(get_string("vcbot_14"))
+
+
+@vc_asst("resumevc")
+async def resumer(event):
+    if len(event.text.split()) > 1:
+        chat = event.text.split()[1]
+        try:
+            chat = await event.client.parse_id(chat)
+        except Exception as e:
+            return await event.eor(f"**ERROR:**\n{str(e)}")
+    else:
+        chat = event.chat_id
+    aySongs = Player(chat)
+    await aySongs.group_call.set_pause(False)
+    await event.eor(get_string("vcbot_13"))
+
+
+@vc_asst("addauth", from_users=owner_and_sudos(), vc_auth=False)
+async def auth_group(event):
+    try:
+        key = event.text.split(" ", maxsplit=1)[1]
+        admins = "admins" in key
+    except IndexError:
+        admins = False
+    chat = event.chat_id
+    key = udB.get_key("VC_AUTH_GROUPS") or {}
+    cha, adm = (key[chat], key[chat]["admins"]) if key.get(chat) else (None, None)
+    if cha and adm == admins:
+        return await event.reply(get_string("vcbot_19"))
+    key.update({chat: {"admins": admins}})
+    udB.set_key("VC_AUTH_GROUPS", key)
+    kem = "Admins" if admins else "All"
+    await event.eor(
+        f"• Berhasil Ditambahkan ke Grup AUTH Untuk <code>{kem}</code>.",
+        parse_mode="html",
     )
-    if reply.document.thumbs:
-        thumb = await reply.download_media("/downloads/", thumb=-1)
-    return dl, thumb, title, reply.message_link, duration
 
 
-# --------------------------------------------------
+@vc_asst("remauth", from_users=owner_and_sudos(), vc_auth=False)
+async def auth_group(event):
+    chat = event.chat_id
+    key = udB.get_key("VC_AUTH_GROUPS") or {}
+    gc = key.get(chat)
+    if not gc:
+        return await event.eor(get_string("vcbot_16"))
+    del key[chat]
+    if key:
+        udB.set_key("VC_AUTH_GROUPS", key)
+    else:
+        udB.del_key("VC_AUTH_GROUPS")
+    await event.eor(get_string("vcbot_10"))
+
+
+@vc_asst("listauth", from_users=owner_and_sudos(), vc_auth=False)
+async def listVc(e):
+    chats = udB.get_key("VC_AUTH_GROUPS")
+    if not chats:
+        return await e.eor(get_string("vcbot_18"))
+    text = "• <strong>Vc Auth Chats •</strong>\n\n"
+    for on in chats.keys():
+        st = "Admins" if chats[on]["admins"] else "All"
+        try:
+            title = (await e.client.get_entity(on)).title
+        except ValueError:
+            title = "No Info"
+        text += f"∆ <strong>{title}</strong> [ <code>{on}</code> ] : <code>{st}</code>"
+    await e.eor(text, parse_mode="html")
+
+
+@vc_asst("listplay")
+async def lstqueue(event):
+    if len(event.text.split()) > 1:
+        chat = event.text.split()[1]
+        try:
+            chat = await event.client.parse_id(chat)
+        except Exception as e:
+            return await event.eor(get_string("vcbot_2").format(str(e)))
+    else:
+        chat = event.chat_id
+    if q := list_queue(chat):
+        await event.eor(f"• <strong>Queue:</strong>\n\n{q}", parse_mode="html")
+    else:
+        return await event.eor(get_string("vcbot_21"))
+
+
+@vc_asst("rejoin")
+async def rejoiner(event):
+    if len(event.text.split()) > 1:
+        chat = event.text.split()[1]
+        try:
+            chat = await event.client.parse_id(chat)
+        except Exception as e:
+            return await event.eor(get_string("vcbot_2").format(str(e)))
+    else:
+        chat = event.chat_id
+    aySongs = Player(chat)
+    try:
+        await aySongs.group_call.reconnect()
+    except NotConnectedError:
+        return await event.eor(get_string("vcbot_6"))
+    await event.eor(get_string("vcbot_5"))
+
+
+@vc_asst("skip")
+async def skipper(event):
+    if len(event.text.split()) > 1:
+        chat = event.text.split()[1]
+        try:
+            chat = await event.client.parse_id(chat)
+        except Exception as e:
+            return await event.eor(f"**ERROR:**\n{str(e)}")
+    else:
+        chat = event.chat_id
+    aySongs = Player(chat, event)
+    await aySongs.play_from_queue()
+
+
+@vc_asst("vplay")
+async def video_c(event):
+    xx = await event.eor(get_string("com_1"))
+    chat = event.chat_id
+    from_user = inline_mention(event.sender)
+    reply, song = None, None
+    if event.reply_to:
+        reply = await event.get_reply_message()
+    if len(event.text.split()) > 1:
+        input = event.text.split(maxsplit=1)[1]
+        tiny_input = input.split()[0]
+        if tiny_input[0] in ["@", "-"]:
+            try:
+                chat = await event.client.parse_id(tiny_input)
+            except Exception as er:
+                LOGS.exception(er)
+                return await xx.edit(str(er))
+            try:
+                song = input.split(maxsplit=1)[1]
+            except BaseException:
+                pass
+        else:
+            song = input
+    if not (reply or song):
+        return await xx.eor(get_string("vcbot_15"), time=5)
+    await xx.eor(get_string("vcbot_20"))
+    if reply and reply.media and mediainfo(reply.media).startswith("video"):
+        song, thumb, title, link, duration = await file_download(xx, reply)
+    else:
+        is_link = is_url_ok(song)
+        if is_link is False:
+            return await xx.eor(f"`{song}`\n\nBukan link yang bisa dimainkan.🥱")
+        if is_link is None:
+            song, thumb, title, link, duration = await vid_download(song)
+        elif re.search("youtube", song) or re.search("youtu", song):
+            song, thumb, title, link, duration = await vid_download(song)
+        else:
+            song, thumb, title, link, duration = (
+                song,
+                "https://telegra.ph/file/22bb2349da20c7524e4db.mp4",
+                song,
+                song,
+                "♾",
+            )
+    aySongs = Player(chat, xx, True)
+    if not (await aySongs.vc_joiner()):
+        return
+    text = "🎥 **Sedang dimainkan:** [{}]({})\n⏰ **Durasi:** `{}`\n👥 **Di:** `{}`\n🙋‍♂ **Diminta oleh:** {}".format(
+        title, link, duration, chat, from_user
+    )
+    try:
+        await xx.reply(
+            text,
+            file=thumb,
+            link_preview=False,
+        )
+    except ChatSendMediaForbiddenError:
+        await xx.reply(text, link_preview=False)
+    await asyncio.sleep(1)
+    await aySongs.group_call.start_video(song, with_audio=True)
+    await xx.delete()
+
+
+@vc_asst("listvcaccess$", from_users=owner_and_sudos(), vc_auth=False)
+async def _(e):
+    xx = await e.eor(get_string("vcbot_11"))
+    mm = get_vcsudos()
+    pp = f"<strong>{len(mm)} Pengguna yang Disetujui Bot Obrolan Suara</strong>\n"
+    if len(mm) > 0:
+        for m in mm:
+            try:
+                name = (await e.client.get_entity(int(m))).first_name
+                pp += f"• <a href=tg://user?id={int(m)}>{name}</a>\n"
+            except ValueError:
+                pp += f"• <code>{int(m)} » No Info</code>\n"
+    await xx.edit(pp, parse_mode="html")
+
+
+@vc_asst("rmvcaccess( (.*)|$)", from_users=owner_and_sudos(), vc_auth=False)
+async def _(e):
+    xx = await e.eor("`Disapproving to access Voice Chat features...`")
+    input = e.pattern_match.group(1).strip()
+    if e.reply_to_msg_id:
+        userid = (await e.get_reply_message()).sender_id
+        name = (await e.client.get_entity(userid)).first_name
+    elif input:
+        try:
+            userid = await e.client.parse_id(input)
+            name = (await e.client.get_entity(userid)).first_name
+        except ValueError as ex:
+            return await xx.edit(f"`{str(ex)}`", time=5)
+    else:
+        return await xx.edit(get_string("vcbot_17"), time=3)
+    if not is_vcsudo(userid):
+        return await xx.eor(
+            xx,
+            f"[{name}](tg://user?id={userid})` is not approved to use my Voice Chat Bot.`",
+            time=5,
+        )
+    try:
+        del_vcsudo(userid)
+        await xx.eor(
+            f"[{name}](tg://user?id={userid})` is removed from Voice Chat Bot Users.`",
+            time=5,
+        )
+    except Exception as ex:
+        return await xx.edit(f"`{ex}`", time=5)
+
+
+@vc_asst("vcaccess( (.*)|$)", from_users=owner_and_sudos(), vc_auth=False)
+async def _(e):
+    xx = await e.eor("`Approving to access Voice Chat features...`")
+    input = e.pattern_match.group(1).strip()
+    if e.reply_to_msg_id:
+        userid = (await e.get_reply_message()).sender_id
+        name = (await e.client.get_entity(userid)).first_name
+    elif input:
+        try:
+            userid = await e.client.parse_id(input)
+            name = (await e.client.get_entity(userid)).first_name
+        except ValueError as ex:
+            return await xx.eor(f"`{str(ex)}`", time=5)
+    else:
+        return await xx.eor(get_string("vcbot_17"), time=3)
+    if is_vcsudo(userid):
+        return await xx.eor(
+            f"[{name}](tg://user?id={userid})` is already approved to use my Voice Chat Bot.`",
+            time=5,
+        )
+    try:
+        add_vcsudo(userid)
+        await xx.eor(
+            f"[{name}](tg://user?id={userid})` is added to Voice Chat Bot Users.`",
+            time=5,
+        )
+    except Exception as ex:
+        return await xx.eor(f"`{ex}`", time=5)
+
+
+@vc_asst("ytplaylist")
+async def live_stream(e):
+    xx = await e.eor(get_string("com_1"))
+    if len(e.text.split()) <= 1:
+        return await xx.eor("`Berikan saya link playlist YouTube...`")
+    input = e.text.split()
+    if input[1].startswith("-"):
+        chat = int(input[1])
+        song = e.text.split(maxsplit=2)[2]
+    elif input[1].startswith("@"):
+        cid_moosa = (await e.client.get_entity(input[1])).id
+        chat = int(f"-100{str(cid_moosa)}")
+        song = e.text.split(maxsplit=2)[2]
+    else:
+        song = e.text.split(maxsplit=1)[1]
+        chat = e.chat_id
+    if not (re.search("youtu", song) and re.search("playlist\\?list", song)):
+        return await xx.eor(get_string("vcbot_8"))
+    if not is_url_ok(song):
+        return await xx.eor("`Hanya link playlist Youtube...`")
+    await xx.edit(get_string("vcbot_7"))
+    file, thumb, title, link, duration = await dl_playlist(
+        chat, inline_mention(e), song
+    )
+    aySongs = Player(chat, e)
+    if not aySongs.group_call.is_connected:
+        if not (await aySongs.vc_joiner()):
+            return
+        from_user = inline_mention(e.sender)
+        await xx.reply(
+            "📀 **Sedang dimainkan:** [{}]({})\n⏰ **Durasi:** `{}`\n👥 **Di:** `{}`\n🙋‍♂ **Diminta oleh:** {}".format(
+                f"{title[:30]}...", link, duration, chat, from_user
+            ),
+            file=thumb,
+            link_preview=False,
+        )
+
+        await xx.delete()
+        await aySongs.group_call.start_audio(file)
+    else:
+        from_user = inline_mention(e)
+        add_to_queue(chat, file, title, link, thumb, from_user, duration)
+        return await xx.eor(
+            f"✚ Ditambahkan 🎵 **[{title}]({link})** antrian ke #{list(VC_QUEUE[chat].keys())[-1]}.",
+      )
+      
